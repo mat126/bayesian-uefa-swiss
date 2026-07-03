@@ -27,7 +27,7 @@ bibliography: references.bib
 This is a companion write-up to a longer methodological paper. Here I keep the
 maths light and let the charts do the arguing. The full model specification,
 priors, and convergence diagnostics live in the paper. All the code and data are
-on [GitHub]([LINK-AL-REPO]).
+on [GitHub](https://github.com/mat126/bayesian-uefa-swiss).
 :::
 
 ```{python}
@@ -413,7 +413,7 @@ buildable, it behaves sensibly, and its hardest problem turns out to be not the 
 but where you draw the line.
 
 The code, the model, and every chart in this post are reproducible from the
-[repository]([LINK-AL-REPO]). If you spot something wrong, I would like to know.
+[repository](https://github.com/mat126/bayesian-uefa-swiss). If you spot something wrong, I would like to know.
 
 ## References
 
