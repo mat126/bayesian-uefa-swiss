@@ -6,7 +6,7 @@ description: >
   different fates. I rebuilt qualifying as a Swiss-system tournament,
   powered it with a Bayesian Poisson model, and ran it ten thousand
   times to ask a simple question: would it be fairer?
-author: "Matteo [COGNOME]"
+author: "Matteo Morella"
 date: "2026-01-01"        # <-- aggiorna alla data di pubblicazione
 categories: [football, bayesian, simulation, tournament-design]
 format:
@@ -27,7 +27,7 @@ bibliography: references.bib
 This is a companion write-up to a longer methodological paper. Here I keep the
 maths light and let the charts do the arguing. The full model specification,
 priors, and convergence diagnostics live in the paper. All the code and data are
-on [GitHub]([LINK-AL-REPO]).
+on [GitHub](https://github.com/mat126/bayesian-uefa-swiss).
 :::
 
 ```{python}
@@ -36,7 +36,7 @@ on [GitHub]([LINK-AL-REPO]).
 import pandas as pd
 import numpy as np
 
-DATA = "outputs"   # cartella con gli artefatti salvati dal notebook
+DATA = "output"   # cartella con gli artefatti salvati dal notebook
 mc      = pd.read_parquet(f"{DATA}/results_mc.parquet")
 hist    = pd.read_parquet(f"{DATA}/simulation_history.parquet")
 sq      = pd.read_parquet(f"{DATA}/strength_vs_qual.parquet")
@@ -354,6 +354,103 @@ No surprises at the extremes. The strongest sides qualify in almost every simula
 and the weakest almost never do. The story lives in the middle, among the teams whose
 fate is genuinely in play, and that is where a change of format has room to matter.
 
+::: {#fig-interactive-positions}
+```{python}
+#| label: fig-interactive-positions-code
+#| fig-cap: "Distribuzione delle posizioni finali per ogni nazionale su tutte le simulazioni. Usa il menu a tendina per cambiare squadra. La linea nera segna la qualificazione diretta (12ª), quella tratteggiata il limite dei playoff."
+import numpy as np
+import plotly.graph_objects as go
+
+DIRECT_SPOTS  = 12
+PLAYOFF_SPOTS = 16
+n_total = hist["team"].nunique()          # 54 nazionali
+
+# ── Conteggi per squadra e posizione (righe = squadre, colonne = 1..54) ──
+pos_counts = (hist.groupby(["team", "pos"]).size()
+                  .unstack("pos", fill_value=0)
+                  .reindex(columns=range(1, n_total + 1), fill_value=0))
+
+# ── Statistiche di sintesi per squadra ──────────────────────────────────
+summ = hist.groupby("team").agg(mean_w=("wins", "mean"),
+                                mean_d=("draws", "mean"),
+                                mean_l=("losses", "mean"),
+                                med=("pos", "median"))
+summ["p_dir"]  = pos_counts.loc[:, 1:DIRECT_SPOTS].sum(axis=1) / N_SIMS * 100
+summ["p_play"] = (pos_counts.loc[:, DIRECT_SPOTS + 1:DIRECT_SPOTS + PLAYOFF_SPOTS]
+                            .sum(axis=1) / N_SIMS * 100)
+
+# Ordino le squadre per probabilità di qualificazione diretta (decrescente)
+sorted_teams = summ.sort_values("p_dir", ascending=False).index.tolist()
+
+# ── Colori per fascia: verde = diretta, arancio = playoff, grigio = fuori ─
+COLORS = (["#2e7d32"] * DIRECT_SPOTS
+          + ["#ef6c00"] * PLAYOFF_SPOTS
+          + ["#bdbdbd"] * (n_total - DIRECT_SPOTS - PLAYOFF_SPOTS))
+
+def _title(team):
+    """Titolo dinamico con le statistiche chiave della squadra selezionata."""
+    s = summ.loc[team]
+    return (f"<b>{team}</b> – Distribuzione posizioni finali<br>"
+            f"<span style='font-size:13px'>"
+            f"✓ Diretta: <b>{s.p_dir:.1f}%</b>  |  "
+            f"○ Playoff: <b>{s.p_play:.1f}%</b>  |  "
+            f"Mediana: <b>{int(s.med)}°</b>  |  "
+            f"Media V-P-S: <b>{s.mean_w:.1f}–{s.mean_d:.1f}–{s.mean_l:.1f}</b>"
+            f"</span>")
+
+# ── Una traccia a barre per squadra, visibile solo la prima all'avvio ────
+fig = go.Figure()
+for i, team in enumerate(sorted_teams):
+    counts = pos_counts.loc[team].to_numpy()
+    fig.add_trace(go.Bar(
+        x=list(range(1, n_total + 1)),
+        y=counts.tolist(),
+        name=team,
+        visible=(i == 0),
+        marker_color=COLORS,
+        customdata=(counts / N_SIMS * 100).tolist(),
+        hovertemplate=("<b>Posizione %{x}</b><br>%{y} simulazioni<br>"
+                       "<b>%{customdata:.1f}%</b> dei casi<extra></extra>"),
+    ))
+
+# ── Dropdown: ogni voce mostra una sola traccia e aggiorna il titolo ─────
+buttons = []
+for i, team in enumerate(sorted_teams):
+    buttons.append(dict(
+        label=team,
+        method="update",
+        args=[{"visible": [j == i for j in range(len(sorted_teams))]},
+              {"title": {"text": _title(team), "font": {"size": 15}}}],
+    ))
+
+fig.update_layout(
+    title=dict(text=_title(sorted_teams[0]), font=dict(size=15)),
+    updatemenus=[dict(type="dropdown", x=0.0, y=1.22,
+                      xanchor="left", yanchor="top", buttons=buttons,
+                      showactive=True, bgcolor="#eef2ff", bordercolor="#cccccc")],
+    annotations=[dict(text="Squadra:", x=0.0, y=1.27, xref="paper", yref="paper",
+                      showarrow=False, font=dict(size=13))],
+    xaxis=dict(title="Posizione finale", dtick=5, gridcolor="#eeeeee"),
+    yaxis=dict(title="Simulazioni", gridcolor="#eeeeee"),
+    plot_bgcolor="white", paper_bgcolor="white", height=500,
+    margin=dict(t=130, b=60, l=70, r=30),
+    shapes=[
+        # Linea qualificazione diretta (dopo la 12ª)
+        dict(type="line", x0=DIRECT_SPOTS + 0.5, x1=DIRECT_SPOTS + 0.5,
+             y0=0, y1=1, yref="paper", line=dict(color="#1a1a1a", width=2)),
+        # Linea limite playoff (dopo la 28ª)
+        dict(type="line",
+             x0=DIRECT_SPOTS + PLAYOFF_SPOTS + 0.5,
+             x1=DIRECT_SPOTS + PLAYOFF_SPOTS + 0.5,
+             y0=0, y1=1, yref="paper",
+             line=dict(color="#888888", width=1.5, dash="dash")),
+    ],
+)
+
+fig   # in Quarto basta questo: niente pio.write_html
+```
+:::
+
 ## Is it actually fairer?
 
 This is where "fairer" has to stop being a feeling and become a number. The cleanest
@@ -413,7 +510,7 @@ buildable, it behaves sensibly, and its hardest problem turns out to be not the 
 but where you draw the line.
 
 The code, the model, and every chart in this post are reproducible from the
-[repository]([LINK-AL-REPO]). If you spot something wrong, I would like to know.
+[repository](https://github.com/mat126/bayesian-uefa-swiss). If you spot something wrong, I would like to know.
 
 ## References
 
