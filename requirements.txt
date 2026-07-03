@@ -1,0 +1,29 @@
+# =============================================================================
+# Requirements – Bayesian Forecasting and Swiss-System Simulation
+# =============================================================================
+# Il Filone A (swiss_uefa_qualification.py) usa solo la standard library e
+# non richiede nessuno di questi pacchetti. Le dipendenze sotto servono per
+# la pipeline dati (prep/) e per il modello bayesiano (model.ipynb).
+#
+# NOTA WINDOWS: l'installazione di pymc via pip su Windows puo' far crashare
+# il kernel (pytensor / access violation 3221225477). Il percorso affidabile
+# e' un ambiente conda dal canale conda-forge (vedi environment.yml).
+# Su Linux/macOS pip va bene.
+# =============================================================================
+
+# ── Pipeline dati ────────────────────────────────────────────────────────────
+pandas>=2.0
+numpy>=1.24
+pyarrow>=14.0          # lettura/scrittura Parquet (match_dataset.parquet)
+
+# ── Modello bayesiano (Filone B) ────────────────────────────────────────────
+pymc>=5.10
+arviz>=1.0            # NB: ArviZ 1.x usa idata.to_netcdf(path), non az.to_netcdf(...)
+
+# ── Visualizzazione ─────────────────────────────────────────────────────────
+matplotlib>=3.7
+plotly>=5.18
+
+# ── Notebook ─────────────────────────────────────────────────────────────────
+jupyter
+ipykernel

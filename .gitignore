@@ -1,0 +1,58 @@
+# ── Ambienti virtuali ────────────────────────────────────────────────────────
+.venv/
+.venv*/
+venv/
+env/
+ENV/
+
+# ── Cache Python ─────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ── Jupyter ──────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# ── Dati grezzi (grandi, scaricabili dalle fonti, non ridistribuiti) ────────
+# Il README resta tracciato come guida al setup.
+data/raw/*
+!data/raw/README.md
+
+# ── Dataset processati (rigenerabili da run_pipeline.py) ────────────────────
+data/processed/*
+!data/processed/.gitkeep
+
+# ── Output simulazione / Monte Carlo (rigenerabili rilanciando il modello) ──
+output/*
+!output/.gitkeep
+
+# ── Oggetti InferenceData (pesanti, rigenerabili col sampling) ──────────────
+# Copre sia data/processed/idata.nc sia output/idata.nc.
+*.nc
+
+# ── Grafici per-nazionale e interattivi (rigenerabili) ──────────────────────
+plots/posizione/
+plots/vps/
+plots/interactive_positions.html
+
+# ── Quarto ───────────────────────────────────────────────────────────────────
+/.quarto/
+_site/
+*_cache/
+# La cache di freeze: auto. Lascia la riga sotto COMMENTATA se vuoi versionarla
+# (serve per ricostruire il blog in CI senza rifare il sampling).
+# /_freeze/
+# NON ignorare docs/ se in _quarto.yml hai output-dir: docs (e' il sito che
+# GitHub Pages serve, quindi va committato).
+
+# ── File di sistema / editor ─────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+struttura.txt
+
+# ── Varie ────────────────────────────────────────────────────────────────────
+*.log
+.env

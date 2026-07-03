@@ -1,0 +1,426 @@
+---
+title: "What if UEFA qualifying used a Swiss system?"
+subtitle: "Simulating a fairer road to the World Cup with a hierarchical Bayesian model"
+description: >
+  UEFA's group-stage qualifiers can hand two equally good teams very
+  different fates. I rebuilt qualifying as a Swiss-system tournament,
+  powered it with a Bayesian Poisson model, and ran it ten thousand
+  times to ask a simple question: would it be fairer?
+author: "Matteo [COGNOME]"
+date: "2026-01-01"        # <-- aggiorna alla data di pubblicazione
+categories: [football, bayesian, simulation, tournament-design]
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    code-fold: true
+    code-tools: true
+    fig-cap-location: bottom
+execute:
+  echo: true
+  warning: false
+  freeze: auto
+bibliography: references.bib
+---
+
+::: callout-note
+This is a companion write-up to a longer methodological paper. Here I keep the
+maths light and let the charts do the arguing. The full model specification,
+priors, and convergence diagnostics live in the paper. All the code and data are
+on [GitHub]([LINK-AL-REPO]).
+:::
+
+```{python}
+#| label: setup
+#| include: false
+import pandas as pd
+import numpy as np
+
+DATA = "outputs"   # cartella con gli artefatti salvati dal notebook
+mc      = pd.read_parquet(f"{DATA}/results_mc.parquet")
+hist    = pd.read_parquet(f"{DATA}/simulation_history.parquet")
+sq      = pd.read_parquet(f"{DATA}/strength_vs_qual.parquet")
+params  = pd.read_parquet(f"{DATA}/team_params.parquet")
+cal     = pd.read_parquet(f"{DATA}/calibration_data.parquet")
+
+hist["points"] = 3 * hist["wins"] + hist["draws"]
+N_SIMS = hist["sim"].nunique()
+```
+
+## The complaint nobody can prove
+
+Every qualifying cycle some country misses out by a whisker and their fans spend
+a year calling it unlucky. I think the instinct is right but the target is wrong.
+People blame the draw, as if they were handed an impossibly hard group, when the
+pot system makes a genuinely brutal group nearly impossible to assemble in the
+first place. The real problem with group-stage qualifying is structural, and it
+has less to do with who is in your group than with how little room the format
+leaves you to recover.
+
+A qualifying group is short. You play a small handful of opponents, home and away,
+and that hands every single match an enormous weight. Drop points once, in a game
+you were expected to win, and you can spend the rest of the campaign chasing a gap
+that never closes, because there are barely any matches left in which to close it.
+One bad night, and the whole qualification is compromised.
+
+Seeding is supposed to keep things balanced by spreading strength evenly across
+the groups, and mostly it does. When a group does turn out lopsided, it is usually
+not bad luck at all but a seeding failure: a team that is genuinely strong gets
+slotted into a lower pot, because the pots lean on rankings that do not always
+reflect real quality. And the pots are locked in once, months before anyone kicks
+a ball. Two teams of similar ability can still end up with schedules of very
+different difficulty, and neither of them had any say in it.
+
+A Swiss system takes aim at both problems at once. After the opening round you are
+always paired against teams on your own points total, so you spend the tournament
+playing opponents at your level rather than whoever the pots happened to assign. A
+single slip stops being fatal: lose, and you drop into matches you can win, with
+your final position reflecting a full run of balanced games instead of one costly
+result. So here is the question I set out to answer. If UEFA ran qualifying as a
+**Swiss-system tournament** instead of fixed groups, how much would the outcomes
+change, and would the format really be *fairer*?
+
+## The idea: borrow the format from chess
+
+A Swiss system does something groups cannot. Instead of locking your opponents in
+before the tournament starts, it pairs you round by round against teams on your own
+points total, with each round's matchups decided only once the previous one is over.
+Win early and you climb into harder matchups; stumble and you drop into easier ones.
+Nobody is ever quarantined in a "group of death," because there are no groups and no
+fixed draw. The field self-sorts as it goes.
+
+Chess has used this for over a century to rank hundreds of players in a handful of
+rounds, and the idea is no longer foreign to football's own governance either. In
+2024 UEFA abolished the Champions League group stage and replaced it with a single
+36-team league table, a change it marketed as a "Swiss system." But it is only half
+a Swiss system. The opponents are still drawn up front from seeded pots, before a
+ball is kicked, and the full schedule is fixed from day one. What UEFA borrowed was
+the single-table structure, not the round-by-round pairing that makes a Swiss system
+fair, the part where matchups adapt to results as they happen instead of being locked
+in by a seeding that, as we have seen, does not always get the pecking order right.
+UEFA left that part on the table, and it is exactly the part I want to put back.
+
+The appeal, for a fairness question, is what that pairing does over a full
+tournament: it makes each team's schedule track its own level. You end up facing
+opponents at your strength almost by construction, so the difficulty of your road
+depends on how you play rather than on where the draw happened to place you. That is
+precisely the property the group format cannot guarantee, and precisely the one I
+set out to measure.
+
+## Building the tournament engine
+
+The simulator handles the 54 eligible UEFA nations (Russia is suspended) over eight
+rounds. The mechanics that matter:
+
+- **Swiss pairings** with no rematches. With an even field of 54 teams every round
+  pairs cleanly, so no byes are needed.
+- **Home/away balancing**, so no team is stuck playing everyone away.
+- **Geopolitical restrictions**, so pairings that cannot happen in reality
+  (Spain–Gibraltar, Armenia–Azerbaijan, Kosovo–Serbia) are avoided.
+- A standard tiebreak stack: points, wins, Sonneborn-Berger, Buchholz, goal
+  difference, goals for, FIFA ranking.
+
+The one thing the engine does not decide on its own is the result of each match.
+That is a plug-in. The simulator asks a probability function for the odds of a home
+win, draw, and away win, and simulates from there:
+
+```{python}
+#| eval: false
+def prob_fn(home_team, away_team) -> tuple[float, float, float]:
+    # returns (p_home_win, p_draw, p_away_win)
+    ...
+
+SwissTournament(teams=teams, prob_fn=prob_fn).run()
+```
+
+A placeholder version of that function just uses the FIFA ranking gap. It is fine
+for testing the plumbing but a weak forecaster. The interesting work is in what
+fills the slot, which I will come to. First, a problem that has nothing to do with
+the model and everything to do with how you decide who qualifies.
+
+## Qualifying, and the problem with a hard cut line
+
+Say twelve nations qualify directly for the World Cup and the rest fight through a
+play-off. The obvious way to run this is to rank all 54 teams at the end and draw a
+line: the top twelve go straight through, and a band below them enters the play-off.
+Clean on paper. In practice the line lands in a terrible place.
+
+In an eight-round Swiss the points pile up in narrow bands, and near the cut they
+barely separate at all. Across `{python} f"{N_SIMS:,}"` simulations the twelfth-placed
+team averages `{python} round(hist[hist['pos']==12]['points'].mean(),1)` points and
+the thirteenth `{python} round(hist[hist['pos']==13]['points'].mean(),1)`, a gap of a
+quarter of a point. More to the point:
+
+```{python}
+#| label: tie-stat
+#| echo: false
+piv = hist.pivot_table(index="sim", columns="pos", values="points")
+p_tie_12_13 = (piv[12] == piv[13]).mean()
+p_tie_10 = (piv[10] == piv[12]).mean()
+from IPython.display import Markdown
+Markdown(
+    f"In **{p_tie_12_13:.0%}** of simulations the team that qualifies directly and "
+    f"the team that just misses finish level on points. The cut does not separate a "
+    f"stronger team from a weaker one. It separates two teams with the same record, on "
+    f"goal difference or a tiebreak, and sends one to the World Cup and the other to a "
+    f"play-off."
+)
+```
+
+That is the arbitrariness the whole exercise was meant to remove, sneaking back in at
+the last step. And it reaches surprisingly far up the table. The tied band around the
+cut is usually four or five teams wide, so a side sitting as high as tenth can share
+the cut's points total: it happens in almost half of all simulations
+(`{python} f"{p_tie_10:.0%}"`). Drawing a hard line at position twelve would send some
+of those teams through and drag others down, on nothing more than goal difference.
+
+::: {#fig-points-cut}
+```{python}
+#| label: fig-points-cut-code
+#| fig-cap: "Points by final position across all simulations, for the positions around the direct-qualification cut. The dashed line sits after twelfth place. Notice how the boxes on either side of it overlap almost completely: a hard cut here separates teams that are, on points, indistinguishable."
+import plotly.express as px
+
+band = hist[hist["pos"].between(8, 20)]
+fig = px.box(band, x="pos", y="points",
+             labels={"pos": "Final position", "points": "Points"})
+fig.add_vline(x=12.5, line_dash="dash", line_color="crimson")
+fig.update_layout(showlegend=False, margin=dict(t=10))
+fig.show()
+```
+:::
+
+The fix is not mine to invent, because formats that run Swiss into a play-off have
+lived with this for years and solved it. In competitive Pokémon (the VGC circuit) and
+in chess, the cut to the next stage is not a rank, it is a record. Everyone who
+finishes with at most a set number of losses advances, and the bracket that follows is
+**seeded by final standing**. The line is drawn between record tiers, never between
+two tied competitors.
+
+Ported to qualifying, that gives a cleaner design. Direct qualification is reserved
+for the top tier, the teams clearly clear of the contested band. Everyone in that
+band drops into the play-off, but they carry their standing with them as a seed. That
+seeding is the whole point. A tenth-placed team pulled down by a points tie does not
+enter the play-off as an afterthought; it enters as a top seed, which in football
+terms means a home tie against the weakest side to reach the play-off. It is dragged
+in, but it is dragged in holding the best hand.
+
+This keeps faith with the premise the format started from. One result no longer flips
+you from *in* to *out*. It moves you from a direct ticket to a favourable play-off,
+and where you finished still counts, now as a seed rather than as a coin toss on goal
+difference. Exactly how many teams qualify directly, how wide the play-off tier runs,
+and how many play-off winners go through are all design levers I can turn. What matters
+is the principle: the cut should respect tiers, not slice through teams that finished
+level.
+
+## The engine under the hood: a Bayesian Poisson model
+
+::: callout-tip
+## You can skip this section
+If you only care about the tournament results, jump ahead. This is the part that
+turns "team A plays team B" into a credible score distribution.
+:::
+
+Football scores are counts, so a Poisson model is the natural starting point. Each
+team gets an attacking strength and a defensive strength, and the expected goals in a
+match come from the attack of one side against the defence of the other, plus a home
+advantage term:
+
+$$
+\log(\lambda_{ij}) = \mu + \text{att}_i + \text{def}_j + \gamma \cdot \mathbb{1}[\text{home}]
+$$
+
+This is the lineage of @maher1982 and @dixoncoles1997, made Bayesian and hierarchical
+after @baioblangiardo2010. Two design choices matter. The strengths are **partially
+pooled**, so thin-data teams like San Marino are pulled toward the population mean
+rather than fit wildly on a handful of lopsided results, and the likelihood carries an
+**exponential time decay**, so last autumn's form counts for more than a match from
+four years ago, with friendlies downweighted against competitive fixtures.
+
+The result is one attack and one defence parameter per nation.
+
+::: {#fig-team-params}
+```{python}
+#| label: fig-team-params-code
+#| fig-cap: "Posterior attack (α) and defence (β) parameters for each nation. Sign conventions follow the model above; read positions relative to the cloud rather than as absolute quality."
+fig = px.scatter(params, x="Alpha", y="Beta", text="Squadra",
+                 labels={"Alpha": "Attack (α)", "Beta": "Defence (β)"})
+fig.update_traces(textposition="top center", marker=dict(size=7))
+fig.update_layout(margin=dict(t=10))
+fig.show()
+```
+:::
+
+Before trusting any of it I check that the model predicts real matches well. The chart
+below bins held-out predictions and plots the predicted probability against the
+observed frequency of each outcome; a well-calibrated model sits on the diagonal.
+
+::: {#fig-calibration}
+```{python}
+#| label: fig-calibration-code
+#| fig-cap: "Calibration on held-out matches. Points on the diagonal mean the model's stated probabilities match reality."
+import plotly.graph_objects as go
+
+fig = go.Figure()
+edges = np.linspace(0, 1, 11)
+for col, out, name in [("pred_home", "H", "Home win"),
+                       ("pred_draw", "D", "Draw"),
+                       ("pred_away", "A", "Away win")]:
+    cal["_bin"] = pd.cut(cal[col], bins=edges)
+    grp = (cal.groupby("_bin", observed=True)
+              .apply(lambda d: pd.Series({"pred": d[col].mean(),
+                                          "obs": (d["observed"] == out).mean()}))
+              .dropna())
+    fig.add_scatter(x=grp["pred"], y=grp["obs"], mode="markers+lines", name=name)
+fig.add_scatter(x=[0, 1], y=[0, 1], mode="lines",
+                line=dict(dash="dash", color="grey"), showlegend=False)
+fig.update_layout(xaxis_title="Predicted probability",
+                  yaxis_title="Observed frequency", margin=dict(t=10))
+fig.show()
+```
+:::
+
+```{python}
+#| label: rps
+#| echo: false
+import numpy as np
+
+_order = ["H", "D", "A"]   # scala ordinale: casa, pareggio, trasferta
+
+def _rps(pred_cols, observed):
+    P = cal[pred_cols].to_numpy()
+    O = (pd.get_dummies(observed)
+           .reindex(columns=_order, fill_value=0)
+           .to_numpy().astype(float))
+    Pc, Oc = np.cumsum(P, axis=1), np.cumsum(O, axis=1)
+    return ((Pc[:, :-1] - Oc[:, :-1]) ** 2).sum(axis=1).mean() / (len(_order) - 1)
+
+rps_model = _rps(["pred_home", "pred_draw", "pred_away"], cal["observed"])
+_base = (cal["observed"].value_counts(normalize=True)
+             .reindex(_order).fillna(0).to_numpy())
+for _c, _v in zip(["b_home", "b_draw", "b_away"], _base):
+    cal[_c] = _v
+rps_base = _rps(["b_home", "b_draw", "b_away"], cal["observed"])
+```
+
+::: callout-note
+## Validation
+On `{python} len(cal)` held-out matches the model scores a Ranked Probability Score of
+**`{python} f"{rps_model:.3f}"`**, against **`{python} f"{rps_base:.3f}"`** for a baseline
+that always predicts the historical frequency of a home win, draw, and away win. Lower is
+better, so the model cuts the naive error by roughly 30%. Sampling converged cleanly, with
+all R-hat at 1.00 and no divergent transitions.
+:::
+
+The point to keep straight: I validate the *model* on matches that exist, because a
+Swiss qualifying campaign has never been played and never can be observed. Once the model
+earns trust on real football, I use it as the engine to project a format that does not.
+
+## Running it ten thousand times
+
+A single simulated campaign is one story. To learn anything I need the distribution of
+stories, so the model feeds the simulator and the whole tournament runs under Monte
+Carlo, recording where each nation finishes every time.
+
+```{python}
+#| eval: false
+results = []
+for _ in range(N_SIMULATIONS):
+    tournament = SwissTournament(teams=fresh_teams(), prob_fn=bayesian_prob_fn)
+    results.append(tournament.run(verbose_rounds=False))
+```
+
+I ran `{python} f"{N_SIMS:,}"` simulations, enough that each nation's qualification
+probability is stable to well within a percentage point.
+
+## What the Swiss system produces
+
+Here is each nation's chance of qualifying directly and of reaching the play-off.
+
+::: {#fig-qual-probs}
+```{python}
+#| label: fig-qual-probs-code
+#| fig-cap: "Probability of direct qualification and of reaching the play-off, by nation."
+top = mc.sort_values("P(qualif.)")
+fig = go.Figure()
+fig.add_bar(y=top["Squadra"], x=top["P(diretta)"], name="Direct", orientation="h")
+fig.add_bar(y=top["Squadra"], x=top["P(playoff)"], name="Play-off", orientation="h")
+fig.update_layout(barmode="stack", xaxis_title="Probability", yaxis_title="",
+                  legend_title="", height=900, margin=dict(t=10))
+fig.show()
+```
+:::
+
+No surprises at the extremes. The strongest sides qualify in almost every simulation
+and the weakest almost never do. The story lives in the middle, among the teams whose
+fate is genuinely in play, and that is where a change of format has room to matter.
+
+## Is it actually fairer?
+
+This is where "fairer" has to stop being a feeling and become a number. The cleanest
+version of the question is whether the format rewards being good. If it is fair, a
+team's chance of qualifying should rise steadily with its underlying strength, and
+little else should get in the way.
+
+::: {#fig-strength-qual}
+```{python}
+#| label: fig-strength-qual-code
+#| fig-cap: "Estimated attacking strength against probability of qualifying, one point per nation. The tighter and steeper this relationship, the more the format sorts teams by merit rather than by luck."
+fig = px.scatter(sq, x="alpha", y="p_qual", text="team",
+                 labels={"alpha": "Estimated strength (posterior α)",
+                         "p_qual": "P(qualify)"})
+fig.update_traces(textposition="top center", marker=dict(size=8))
+fig.update_layout(margin=dict(t=10))
+fig.show()
+```
+:::
+
+
+## Where this breaks down
+
+I would rather tell you the limits than have you find them.
+
+The market-value features are a current snapshot, not a match-by-match history, so a
+team's estimated quality does not travel back in time correctly. Team strengths are
+also static within a campaign: real form drifts over a qualifying cycle and the model
+does not follow that drift. And the deepest caveat is unavoidable. I am simulating a
+world in which 54 nations play a format they have never played. The model is trained on
+the football that exists, and I am asking it to extrapolate to football that does not.
+That is a reasonable thing to do, but it is an extrapolation, and the fairness
+conclusions are conditional on it.
+
+## Takeaways
+
+Two things come out of this cleanly. The model earns its keep, scoring well below a
+naive baseline on matches it never saw, and a Swiss qualifying campaign sorts the
+nations largely in order of their strength: qualification probability rises smoothly
+with estimated ability, which is the basic thing you want a fair format to do. The
+strongest sides get through, the weakest do not, and not much in between hangs on an
+accident of the draw.
+
+The sharper lesson is smaller than the one I set out to find. A Swiss system does not
+hand you fairness for free. Run naively it smuggles back the very arbitrariness it was
+meant to remove, because points bunch so tightly that the qualifying line almost always
+falls between teams that finished level. Borrowing the record-tier cut and seeded
+play-off from chess and competitive Pokémon repairs that, and keeps faith with the
+premise the whole thing rests on: one bad night should cost you a seed, not your place.
+
+Whether all of this adds up to a format that is genuinely fairer than the group draw is
+the question I have not fully settled here. Sorting by merit is necessary but it is not
+the whole of fairness, and the honest head-to-head against the real groups, with a
+fairness measure I actually trust, is the next piece of work. For now the takeaway is
+narrower and, I think, more interesting than a verdict: a Swiss World Cup qualifier is
+buildable, it behaves sensibly, and its hardest problem turns out to be not the football
+but where you draw the line.
+
+The code, the model, and every chart in this post are reproducible from the
+[repository]([LINK-AL-REPO]). If you spot something wrong, I would like to know.
+
+## References
+
+::: {#refs}
+:::
+
+## References
+
+::: {#refs}
+:::

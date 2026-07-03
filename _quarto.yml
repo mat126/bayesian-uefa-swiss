@@ -1,0 +1,25 @@
+project:
+  type: website
+  output-dir: docs        # GitHub Pages serve direttamente questa cartella
+
+website:
+  title: "Swiss UEFA Qualification"
+  description: "Simulating a fairer road to the World Cup with a Bayesian model"
+  navbar:
+    right:
+      - icon: github
+        href: https://github.com/mat126/BAYESIAN_MODEL_FOR_UEFA_QC_W_SWISS
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 2
+    code-fold: true
+    code-tools: true
+    fig-cap-location: bottom
+
+bibliography: references.bib
+
+execute:
+  freeze: auto            # non rieseguire i chunk pesanti a ogni build
