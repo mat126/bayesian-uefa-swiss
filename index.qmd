@@ -7,7 +7,7 @@ description: >
   powered it with a Bayesian Poisson model, and ran it ten thousand
   times to ask a simple question: would it be fairer?
 author: "Matteo Morella"
-date: "2026-01-01"        # <-- aggiorna alla data di pubblicazione
+date: "2026-07-01"        
 categories: [football, bayesian, simulation, tournament-design]
 format:
   html:
