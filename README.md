@@ -108,4 +108,4 @@ This project made extensive use of AI tools (Claude, Anthropic) throughout the c
 
 ## License
 
-To be defined. Note that any license chosen here applies to the code in this repository only. The raw datasets are distributed under their own terms by Kaggle and Transfermarkt, and are not redistributed here.
+This project is distributed under the MIT License.
