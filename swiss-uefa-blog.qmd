@@ -6,7 +6,7 @@ description: >
   different fates. I rebuilt qualifying as a Swiss-system tournament,
   powered it with a Bayesian Poisson model, and ran it ten thousand
   times to ask a simple question: would it be fairer?
-author: "Matteo [COGNOME]"
+author: "Matteo Morella"
 date: "2026-01-01"        # <-- aggiorna alla data di pubblicazione
 categories: [football, bayesian, simulation, tournament-design]
 format:
